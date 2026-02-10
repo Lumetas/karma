@@ -2,7 +2,7 @@
 /* Default settings; can be overriden by command line. */
 
 static int topbar = 1;                      /* -b  option; if 0, dmenu appears at bottom     */
-static const unsigned int alpha = 0x88;     /* Amount of opacity. 0xff is opaque             */
+static const unsigned int alpha = 0x60;     /* Amount of opacity. 0xff is opaque             */
 /* -fn option overrides fonts[0]; default X11 font or font set */
 static const char *fonts[] = {
 	"monospace:size=14"
@@ -15,6 +15,7 @@ static const char col_dark1[]      = "#0e4466";   /* Тёмный сине-се�
 static const char col_dark2[]      = "#1d5e72";   /* Серо-синий */
 static const char col_dark3[]      = "#246f8b";   /* Умеренный синий */
 static const char col_dark4[]      = "#308fad";   /* Светлый синий */
+static const char col_dark5[]	   = "#000000";
 static const char col_light0[]     = "#d6b8a1";   /* Светло-бежевый */
 static const char col_light1[]     = "#bb794a";   /* Коричневый */
 static const char col_light2[]     = "#a34c65";   /* Приглушённый розовый */
@@ -24,7 +25,7 @@ static const char col_light4[]     = "#53b0bc";   /* Бирюзовый */
 /* Схемы цветов для dmenu */
 static const char *colors[SchemeLast][2] = {
 	/*     fg (текст)         bg (фон)      */
-	[SchemeNorm] = { col_light0, col_dark0 },     /* обычный элемент */
+	[SchemeNorm] = { col_light0, col_dark5 },     /* обычный элемент */
 	[SchemeSel] = { "#ffffff", col_dark2 },       /* выбранный элемент (фон как активный тег в dwm) */
 	[SchemeOut] = { col_light4, col_dark0 },      /* выходной элемент */
 };
