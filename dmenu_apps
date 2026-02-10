@@ -1,0 +1,2 @@
+#!/bin/bash
+dmenu_app_list -r "$(dmenu_app_list -l | dmenu_center -i)"

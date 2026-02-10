@@ -1,0 +1,22 @@
+#!/bin/bash
+fontsize=10
+get_dmenu_geometry() {
+    local screen_width screen_height dmenu_width dmenu_height dmenu_lines
+    
+    # Получаем размеры экрана
+    screen_width=$(xdpyinfo | awk '/dimensions:/ {print $2}' | cut -d'x' -f1)
+    screen_height=$(xdpyinfo | awk '/dimensions:/ {print $2}' | cut -d'x' -f2)
+    
+    # Размеры dmenu (ширина 40% от экрана, высота 30 строк)
+    dmenu_width=$((screen_width * 40 / 100))
+	dmenu_height=$((screen_height * 40 / 100))
+	dmenu_lines=$(echo "scale=0; $dmenu_height / $fontsize" | bc)
+    
+    # Позиционирование по центру
+    local x_pos=$(( (screen_width - dmenu_width) / 2 ))
+    local y_pos=$(( screen_height / 4 ))  # 1/4 от верхнего края
+    
+    echo "-X $x_pos -Y $y_pos -W $dmenu_width -H $dmenu_height -l $dmenu_lines"
+}
+
+dmenu $(get_dmenu_geometry) $@
