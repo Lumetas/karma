@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# Получаем список окон в нужном формате
+window_list=$(dharmactl window.list.info | \
+    awk -F'|' '{split($2,a,","); print a[1] ": " $3 "|" $4}')
+
+# Выводим через dmenu (скрывая номер тега от пользователя)
+selected=$(echo "$window_list" | cut -d'|' -f1 | dmenu_center -i)
+
+if [ -n "$selected" ]; then
+    # Находим соответствующий тег
+    tag_number=$(echo "$window_list" | grep "^$selected|" | cut -d'|' -f2)
+    
+    if [ -n "$tag_number" ]; then
+        dharmactl tag.moveTo "$tag_number"
+    fi
+fi

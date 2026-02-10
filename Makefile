@@ -42,13 +42,14 @@ dist: clean
 
 install: all
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
-	cp -f dmenu dmenu_path dmenu_run dmenu_center dmenu_apps dmenu_app_list stest $(DESTDIR)$(PREFIX)/bin
+	cp -f dmenu dmenu_path dmenu_run dmenu_center dmenu_apps dmenu_app_list dmenu_windows stest $(DESTDIR)$(PREFIX)/bin
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/dmenu
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/dmenu_path
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/dmenu_run
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/dmenu_center
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/dmenu_apps
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/dmenu_app_list
+	chmod 755 $(DESTDIR)$(PREFIX)/bin/dmenu_windows
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/stest
 	mkdir -p $(DESTDIR)$(MANPREFIX)/man1
 	sed "s/VERSION/$(VERSION)/g" < dmenu.1 > $(DESTDIR)$(MANPREFIX)/man1/dmenu.1
