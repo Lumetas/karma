@@ -1,96 +1,239 @@
 #!/usr/bin/env bash
 
+set -o pipefail
+
 # Конфигурация
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/app-launcher"
-CACHE_FILE="$CACHE_DIR/desktop-apps.txt"
+CACHE_FILE="$CACHE_DIR/desktop-apps.cache"
 CACHE_MAX_AGE=3600  # 1 час в секундах
 
 # Создаем директорию для кэша если её нет
 mkdir -p "$CACHE_DIR"
 
-# Функция для получения списка .desktop файлов
-get_desktop_apps() {
-    # Ищем .desktop файлы в стандартных директориях
-    local desktop_dirs=(
-        "/usr/share/applications"
-        "/usr/local/share/applications"
-        "$HOME/.local/share/applications"
-    )
+# Функция для быстрого парсинга .desktop файлов
+parse_desktop_file() {
+    local file="$1"
+    local name=""
+    local exec_cmd=""
+    local hidden=""
+    local nodisplay=""
+    local tryexec=""
+    local notshowin=""
+    local onlyshowin=""
+    local current_section=""
     
-    # Добавляем пути из XDG_DATA_DIRS если они существуют
-    IFS=':' read -ra xdg_dirs <<< "${XDG_DATA_DIRS:-/usr/local/share/:/usr/share/}"
-    for dir in "${xdg_dirs[@]}"; do
-        if [[ -d "$dir/applications" ]]; then
-            desktop_dirs+=("$dir/applications")
+    # Читаем файл построчно для скорости
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Убираем пробелы в начале и конце
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        
+        # Пропускаем пустые строки и комментарии
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        
+        # Проверяем секции
+        if [[ "$line" == \[*\] ]]; then
+            current_section="$line"
+            continue
         fi
-    done
+        
+        # Обрабатываем только секцию Desktop Entry
+        [[ "$current_section" != "[Desktop Entry]" ]] && continue
+        
+        case "$line" in
+            Name=*)
+                [[ -z "$name" ]] && name="${line#Name=}"
+                ;;
+            Exec=*)
+                [[ -z "$exec_cmd" ]] && exec_cmd="${line#Exec=}"
+                ;;
+            Hidden=*)
+                hidden="${line#Hidden=}"
+                ;;
+            NoDisplay=*)
+                nodisplay="${line#NoDisplay=}"
+                ;;
+            TryExec=*)
+                tryexec="${line#TryExec=}"
+                ;;
+            NotShowIn=*)
+                notshowin="${line#NotShowIn=}"
+                ;;
+            OnlyShowIn=*)
+                onlyshowin="${line#OnlyShowIn=}"
+                ;;
+        esac
+    done < "$file"
+    
+    # Проверяем валидность
+    [[ -z "$name" || -z "$exec_cmd" ]] && return 1
+    [[ "$hidden" == "true" || "$nodisplay" == "true" ]] && return 1
+    
+    # Проверяем TryExec
+    if [[ -n "$tryexec" ]]; then
+        local found=0
+        # Проверяем различные варианты путей
+        if command -v "$tryexec" >/dev/null 2>&1; then
+            found=1
+        elif [[ -f "$tryexec" && -x "$tryexec" ]]; then
+            found=1
+        elif [[ -f "/usr/bin/$tryexec" && -x "/usr/bin/$tryexec" ]]; then
+            found=1
+        elif [[ -f "/bin/$tryexec" && -x "/bin/$tryexec" ]]; then
+            found=1
+        fi
+        [[ $found -eq 0 ]] && return 1
+    fi
+    
+    # Проверяем OnlyShowIn/NotShowIn (простая версия)
+    if [[ -n "$onlyshowin" ]]; then
+        # Если указан OnlyShowIn и текущая среда не в списке - пропускаем
+        if [[ -z "$XDG_CURRENT_DESKTOP" ]] || ! grep -qi "$XDG_CURRENT_DESKTOP" <<< "$onlyshowin"; then
+            return 1
+        fi
+    fi
+    
+    if [[ -n "$notshowin" ]]; then
+        # Если указан NotShowIn и текущая среда в списке - пропускаем
+        if [[ -n "$XDG_CURRENT_DESKTOP" ]] && grep -qi "$XDG_CURRENT_DESKTOP" <<< "$notshowin"; then
+            return 1
+        fi
+    fi
+    
+    # Очищаем Exec от % параметров и экранирования
+    exec_cmd=$(echo "$exec_cmd" | sed -E '
+        s/%[UDFNnmickv]//g;
+        s/%[%]/?/g;
+        s/%[a-zA-Z]//g;
+        s/\\s/ /g;
+        s/^"//; s/"$//;
+        s/^ *//; s/ *$//
+    ')
+    
+    # Очищаем имя от спецсимволов для dmenu
+    local clean_name=$(echo "$name" | sed -E '
+        s/&//g;
+        s/[<>|]/_/g;
+        s/^\s+|\s+$//g
+    ')
+    
+    echo "$clean_name|$exec_cmd|$file"
+    return 0
+}
 
-    # Ищем только валидные .desktop файлы с секцией [Desktop Entry]
+# Функция для поиска .desktop файлов
+find_desktop_files() {
+    local desktop_dirs=()
+    local seen_files=()  # Ассоциативный массив для дедупликации
+    local temp_file
+    temp_file=$(mktemp)
+    
+    # 1. Системные директории
+    IFS=':' read -ra xdg_dirs <<< "${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+    for dir in "${xdg_dirs[@]}"; do
+        [[ -d "$dir/applications" ]] && desktop_dirs+=("$dir/applications")
+    done
+    
+    # 2. Пользовательские директории
+    [[ -d "$HOME/.local/share/applications" ]] && desktop_dirs+=("$HOME/.local/share/applications")
+    
+    # 3. Flatpak системные
+    if [[ -d "/var/lib/flatpak/exports/share/applications" ]]; then
+        desktop_dirs+=("/var/lib/flatpak/exports/share/applications")
+    fi
+    
+    # 4. Flatpak пользовательские
+    if [[ -d "$HOME/.local/share/flatpak/exports/share/applications" ]]; then
+        desktop_dirs+=("$HOME/.local/share/flatpak/exports/share/applications")
+    fi
+    
+    # 5. Snap приложения
+    [[ -d "/var/lib/snapd/desktop/applications" ]] && desktop_dirs+=("/var/lib/snapd/desktop/applications")
+	
+    
+    # Используем find с -print0 и xargs -0 для скорости
     for dir in "${desktop_dirs[@]}"; do
         if [[ -d "$dir" ]]; then
-            find "$dir" -maxdepth 3 -name "*.desktop" -type f 2>/dev/null | \
-            while read -r file; do
-                # Проверяем что это валидный .desktop файл
-                if grep -q "^\[Desktop Entry\]" "$file" 2>/dev/null; then
-                    # Извлекаем имя приложения (Name)
-                    local name=$(grep -E "^Name=" "$file" | head -n1 | cut -d'=' -f2-)
-                    # Извлекаем Exec команду
-                    local exec_cmd=$(grep -E "^Exec=" "$file" | head -n1 | cut -d'=' -f2-)
+            find "$dir" -maxdepth 3 -name "*.desktop" -type f,l -print0 2>/dev/null |  \
+            while IFS= read -r -d '' file; do
+                [[ -r "$file" ]] || continue
+                
+                # Дедупликация по базовому имени файла
+                local basename=$(basename "$file")
+                if [[ ! " ${seen_files[@]} " =~ " ${basename} " ]]; then
+                    seen_files+=("$basename")
+                    parse_desktop_file "$file" >> "$temp_file" &
                     
-                    # Очищаем Exec от % и прочих параметров
-                    exec_cmd=$(echo "$exec_cmd" | sed -e 's/%.//g' -e 's/^"//' -e 's/"$//')
-                    
-                    if [[ -n "$name" && -n "$exec_cmd" ]]; then
-                        # Проверяем не скрыто ли приложение
-                        if ! grep -q "^Hidden=true" "$file" && ! grep -q "^NoDisplay=true" "$file"; then
-                            # Убираем & из вывода для dmenu
-                            clean_name=$(echo "$name" | sed 's/&//g')
-                            echo "$clean_name|$exec_cmd|$file"
-                        fi
+                    # Ограничиваем количество параллельных процессов
+                    if [[ $(jobs -r | wc -l) -ge 4 ]]; then
+                        wait -n
                     fi
                 fi
             done
         fi
     done
+    
+    wait  # Дожидаемся завершения всех фоновых процессов
+    
+    # Убираем дубликаты по имени, сохраняя первый (пользовательский) найденный
+    awk -F'|' '!seen[$1]++' "$temp_file" | sort -f -t'|' -k1,1
+    
+    rm -f "$temp_file"
 }
 
-# Функция для обновления кэша
+# Функция для быстрого обновления кэша
 update_cache() {
-    # Получаем список приложений, сортируем и убираем дубликаты по имени
-    get_desktop_apps | sort -u -t'|' -k1,1 > "$CACHE_FILE.tmp"
+    local cache_tmp="$CACHE_FILE.tmp.$$"
+    local count=0
     
-    # Убираем дубликаты команд (некоторые приложения могут иметь одинаковое имя)
-    awk -F'|' '!seen[$1]++' "$CACHE_FILE.tmp" > "$CACHE_FILE"
-    rm -f "$CACHE_FILE.tmp"
+    # Получаем список приложений
+    find_desktop_files > "$cache_tmp"
     
-    # Добавляем timestamp для отслеживания возраста кэша
-    date +%s > "$CACHE_DIR/last-update"
+    # Проверяем что кэш не пустой
+    if [[ -s "$cache_tmp" ]]; then
+        # Атомарно заменяем кэш
+        mv -f "$cache_tmp" "$CACHE_FILE"
+        count=$(wc -l < "$CACHE_FILE")
+        date +%s > "$CACHE_DIR/last-update"
+        echo "✅ Кэш обновлен: $count приложений" >&2
+    else
+        rm -f "$cache_tmp"
+        if [[ ! -s "$CACHE_FILE" ]]; then
+            echo "⚠️  Ошибка: не найдено ни одного приложения" >&2
+            return 1
+        fi
+    fi
 }
 
-# Функция для проверки возраста кэша
+# Функция для проверки кэша
 is_cache_valid() {
-    if [[ ! -f "$CACHE_FILE" || ! -f "$CACHE_DIR/last-update" ]]; then
-        return 1  # Кэш не существует
-    fi
+    [[ -f "$CACHE_FILE" ]] || return 1
+    [[ -s "$CACHE_FILE" ]] || return 1
+    [[ -f "$CACHE_DIR/last-update" ]] || return 1
     
-    local last_update
-    last_update=$(cat "$CACHE_DIR/last-update" 2>/dev/null)
-    local current_time
-    current_time=$(date +%s)
+    local last_update=$(cat "$CACHE_DIR/last-update" 2>/dev/null)
+    [[ -n "$last_update" ]] || return 1
+    
+    local current_time=$(date +%s)
     local cache_age=$((current_time - last_update))
     
-    [[ $cache_age -le $CACHE_MAX_AGE ]] && return 0 || return 1
+    # Проверяем возраст кэша и размер
+    [[ $cache_age -le $CACHE_MAX_AGE ]] && return 0
+    return 1
 }
 
-# Функция для вывода списка приложений
-list_apps() {
-    # Обновляем кэш если он устарел или не существует
-    if ! is_cache_valid; then
-        update_cache
-    fi
+# Функция для быстрого поиска в кэше
+search_in_cache() {
+    local query="$1"
+    local mode="${2:-exact}"
     
-    # Выводим только имена приложений (первое поле)
-    cut -d'|' -f1 "$CACHE_FILE" | sort
+    if [[ "$mode" == "exact" ]]; then
+        # Точное совпадение (начало строки)
+        grep -E "^$query\\|" "$CACHE_FILE" 2>/dev/null | head -n1
+    else
+        # Частичное совпадение (без учета регистра)
+        grep -i "$query" "$CACHE_FILE" 2>/dev/null | head -n1
+    fi
 }
 
 # Функция для запуска приложения
@@ -98,59 +241,116 @@ run_app() {
     local app_name="$1"
     
     if [[ -z "$app_name" ]]; then
-        echo "Ошибка: не указано имя приложения" >&2
-        exit 1
+        echo "❌ Ошибка: не указано имя приложения" >&2
+        return 1
     fi
     
-    # Обновляем кэш если он устарел
+    # Обновляем кэш если нужно
     if ! is_cache_valid; then
+        echo "🔄 Кэш устарел, обновление..." >&2
         update_cache
     fi
     
-    # Ищем приложение в кэше
-    local app_info
-    app_info=$(grep -F "|$app_name|" "$CACHE_FILE" 2>/dev/null | head -n1)
+    # Ищем приложение
+    local app_info=$(search_in_cache "$app_name" "exact")
     
+    # Если не нашли, пробуем частичное совпадение
     if [[ -z "$app_info" ]]; then
-        # Попробуем найти по частичному совпадению
-        app_info=$(grep -i "$app_name" "$CACHE_FILE" 2>/dev/null | head -n1)
+        app_info=$(search_in_cache "$app_name" "partial")
     fi
     
     if [[ -n "$app_info" ]]; then
-        local exec_cmd
-        exec_cmd=$(echo "$app_info" | cut -d'|' -f2)
+        local exec_cmd=$(echo "$app_info" | cut -d'|' -f2)
+        local original_name=$(echo "$app_info" | cut -d'|' -f1)
+        local desktop_file=$(echo "$app_info" | cut -d'|' -f3)
         
-        # Запускаем приложение в фоне
-        echo "Запуск: $exec_cmd" >&2
+        echo "▶️  Запуск: $original_name" >&2
         
-        # Обрабатываем команду для правильного запуска
-        # Убираем возможные оставшиеся % символы
-        exec_cmd=$(echo "$exec_cmd" | sed 's/%.//g')
-        
-        # Запускаем
-        if command -v setsid >/dev/null 2>&1; then
-            setsid /bin/sh -c "$exec_cmd" >/dev/null 2>&1 &
-        else
-            nohup /bin/sh -c "$exec_cmd" >/dev/null 2>&1 &
+        # Специальная обработка для Flatpak
+        if [[ "$desktop_file" == *flatpak* ]]; then
+            local app_id=$(basename "$desktop_file" .desktop)
+            exec_cmd="flatpak run $app_id"
         fi
-        disown
+        
+        # Очищаем команду финально
+        exec_cmd=$(echo "$exec_cmd" | sed -E '
+            s/%[UDFNnmickv]//g;
+            s/%[%]/?/g;
+            s/%[a-zA-Z]//g;
+            s/^"//; s/"$//;
+            s/^ *//; s/ *$//
+        ')
+        
+        # Запускаем с правильным детачментом
+        if command -v setsid >/dev/null 2>&1; then
+            (nohup setsid /bin/sh -c "exec $exec_cmd" >/dev/null 2>&1 &)
+        else
+            (nohup /bin/sh -c "exec $exec_cmd" >/dev/null 2>&1 &)
+        fi
+        
+        # Даем время на запуск
+        sleep 0.1
+        
+        echo "✅ Приложение запущено" >&2
+        return 0
     else
-        echo "Приложение '$app_name' не найдено" >&2
-        exit 1
+        echo "❌ Приложение '$app_name' не найдено" >&2
+        echo "" >&2
+        echo "📋 Попробуйте одно из:" >&2
+        list_apps | head -10 | sed 's/^/   /' >&2
+        return 1
     fi
 }
 
-# Функция для принудительного обновления кэша
-force_update_cache() {
-    update_cache
+# Функция для вывода списка приложений
+list_apps() {
+    # Быстрая проверка и обновление кэша
+    if ! is_cache_valid; then
+        update_cache >/dev/null 2>&1 &
+        local spinner_pid=$!
+        echo "🔄 Обновление кэша..." >&2
+        wait $spinner_pid
+    fi
+    
+    if [[ ! -s "$CACHE_FILE" ]]; then
+        echo "⚠️  Кэш пуст, принудительное обновление..." >&2
+        update_cache
+    fi
+    
+    # Быстрый вывод только имен
+    cut -d'|' -f1 "$CACHE_FILE" 2>/dev/null | sort -f | uniq
 }
 
-# Основная логика
+# Функция для статистики
+show_stats() {
+    local total=$(wc -l < "$CACHE_FILE" 2>/dev/null || echo "0")
+    local cache_age="нет"
+    
+    if [[ -f "$CACHE_DIR/last-update" ]]; then
+        local last=$(cat "$CACHE_DIR/last-update")
+        local now=$(date +%s)
+        local age=$((now - last))
+        if [[ $age -lt 60 ]]; then
+            cache_age="${age} сек"
+        elif [[ $age -lt 3600 ]]; then
+            cache_age="$((age / 60)) мин"
+        else
+            cache_age="$((age / 3600)) ч $(((age % 3600) / 60)) мин"
+        fi
+    fi
+    
+    echo "📊 Статистика:"
+    echo "   Приложений: $total"
+    echo "   Кэш от: $cache_age"
+    echo "   Файл: $CACHE_FILE"
+}
+
+# Основная функция
 main() {
     local mode="list"
     local app_name=""
     
-    # Парсим аргументы
+    # Быстрый парсинг аргументов
     while [[ $# -gt 0 ]]; do
         case $1 in
             -l|--list)
@@ -159,32 +359,42 @@ main() {
                 ;;
             -r|--run)
                 mode="run"
-                app_name="$2"
-                shift 2
+                shift
+                app_name="$*"
+                break
                 ;;
             -u|--update)
-                force_update_cache
+                update_cache
+                exit $?
+                ;;
+            -s|--stats)
+                show_stats
                 exit 0
                 ;;
             -h|--help)
+                echo "🔍 App Launcher - быстрый запуск приложений"
+                echo ""
                 echo "Использование: $0 [ОПЦИИ]"
                 echo ""
                 echo "Опции:"
-                echo "  -l, --list              Вывести список приложений (по умолчанию)"
-                echo "  -r, --run <appname>     Запустить указанное приложение"
-                echo "  -u, --update            Принудительно обновить кэш"
-                echo "  -h, --help              Показать эту справку"
+                echo "  -l, --list              Вывести список приложений"
+                echo "  -r, --run <app>         Запустить приложение"
+                echo "  -u, --update            Обновить кэш"
+                echo "  -s, --stats             Показать статистику"
+                echo "  -h, --help              Эта справка"
                 echo ""
                 echo "Примеры:"
-                echo "  $0 -l | dmenu           Выбрать приложение через dmenu"
-                echo "  $0 -r firefox           Запустить Firefox"
-                echo "  $0 --update             Обновить кэш приложений"
+                echo "  $0 -l | dmenu -l 20 -p 'Запуск:'"
+                echo "  $0 -r firefox"
+                echo "  $0 --run \"Visual Studio Code\""
+                echo "  $0 -u"
                 exit 0
                 ;;
             *)
-                echo "Неизвестный аргумент: $1" >&2
-                echo "Используйте $0 -h для справки" >&2
-                exit 1
+                # Если неизвестный аргумент, пробуем запустить как приложение
+                mode="run"
+                app_name="$1"
+                shift
                 ;;
         esac
     done
@@ -199,5 +409,8 @@ main() {
     esac
 }
 
-# Запускаем основную функцию
+# Обработка ошибок
+trap 'echo "⚠️  Ошибка в строке $LINENO" >&2' ERR
+
+# Запуск
 main "$@"
