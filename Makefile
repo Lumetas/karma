@@ -42,11 +42,12 @@ dist: clean
 
 install: all
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
-	cp -f dmenu dmenu_path dmenu_run dmenu_center dmenu_apps dmenu_app_list dmenu_windows stest $(DESTDIR)$(PREFIX)/bin
+	cp -f dmenu_prompt dmenu dmenu_path dmenu_run dmenu_center dmenu_apps dmenu_app_list dmenu_windows stest $(DESTDIR)$(PREFIX)/bin
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/dmenu
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/dmenu_path
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/dmenu_run
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/dmenu_center
+	chmod 755 $(DESTDIR)$(PREFIX)/bin/dmenu_prompt
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/dmenu_apps
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/dmenu_app_list
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/dmenu_windows
