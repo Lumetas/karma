@@ -281,12 +281,11 @@ run_app() {
             s/^ *//; s/ *$//
         ')
 
-        
-        # Запускаем с правильным детачментом
         if command -v setsid >/dev/null 2>&1; then
-            (nohup setsid /bin/sh -c "exec '$exec_cmd'" >/dev/null 2>&1 &)
+            (nohup setsid sh -c "$exec_cmd" >/dev/null 2>&1 &)
+			echo 'setsid';
         else
-            (nohup /bin/sh -c "exec '$exec_cmd'" >/dev/null 2>&1 &)
+            (nohup sh -c "$exec_cmd" >/dev/null 2>&1 &)
         fi
         
         # Даем время на запуск

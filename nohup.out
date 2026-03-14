@@ -1,0 +1,46 @@
+Could not parse file "/home/lum/.local/share/applications/melora.desktop": No such file or directory
+QPainter::begin: Paint device returned engine == 0, type: 2
+QWidget::render: Cannot render with an inactive painter
+Could not parse file "/home/lum/.local/share/applications/melora.desktop": No such file or directory
+QPainter::begin: Paint device returned engine == 0, type: 2
+QWidget::render: Cannot render with an inactive painter
+sh: 1: /home/lum/.apps/Telegram/Telegram --: not found
+sh: 1: /home/lum/.apps/Telegram/Telegram --: not found
+sh: 1: /home/lum/.apps/Telegram/Telegram --: not found
+sh: 1: /home/lum/.apps/Telegram/Telegram --: not found
+sh: 1: /home/lum/.apps/Telegram/Telegram --: not found
+sh: 1: /home/lum/.apps/Telegram/Telegram --: not found
+arg.h
+config.def.h
+config.h
+config.mk
+dmenu
+dmenu.1
+dmenu_app_list
+dmenu_apps
+dmenu.c
+dmenu_center
+dmenu_file_finder
+dmenu.o
+dmenu_path
+dmenu_prompt
+dmenu_run
+dmenu_windows
+drw.c
+drw.h
+drw.o
+LICENSE
+log
+Makefile
+nohup.out
+README
+stest
+stest.1
+stest.c
+stest.o
+util.c
+util.h
+util.o
+sh: 1: /home/lum/.apps/Telegram/Telegram --: not found
+sh: 1: /home/lum/.apps/Telegram/Telegram --: not found
+sh: 1: /home/lum/.apps/Telegram/Telegram --: not found
