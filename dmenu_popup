@@ -1,0 +1,164 @@
+#!/bin/bash
+
+# ============================================
+# Universal popup notifier for dwm
+# Usage: popup <device> <action>
+# ============================================
+
+# Цвета - ВСЕ БЕЛЫЕ (и обычный, и выделенный)
+BG="#051b35"      # фон
+FG="#ffffff"      # обычный текст - БЕЛЫЙ
+SB="#051b35"      # фон выделенного - такой же как фон
+SF="#ffffff"      # выделенный текст - ТОЖЕ БЕЛЫЙ
+
+WIDTH=140
+HEIGHT=2
+TIMEOUT=0.8
+
+calculate_position() {
+    local screen_width=$(xrandr | grep '*' | awk '{print $1}' | cut -d'x' -f1 | head -1)
+    echo $(($screen_width / 2 - $WIDTH / 2))
+}
+
+render_status() {
+    local name="$1"
+    local percent="$2"
+    local status="$3"
+    
+    local label=""
+    case "$name" in
+        volume) label="VOL" ;;
+        screen) label="SCR" ;;
+        kbd) label="KBD" ;;
+    esac
+    
+    # Первая строка
+    if [ "$status" = "muted" ]; then
+        local line1="$label MUTE"
+    else
+        local line1="$label $percent%"
+    fi
+    
+    # Вторая строка - прогресс бар
+    if [ "$status" != "muted" ] && [ -n "$percent" ] && [ "$percent" -ge 0 ]; then
+        local filled=$((percent / 10))
+        local empty=$((10 - filled))
+        local bar=""
+        for i in $(seq 1 $filled); do bar="${bar}█"; done
+        for i in $(seq 1 $empty); do bar="${bar}░"; done
+        local line2="$bar"
+    else
+        local line2="----------"
+    fi
+    
+    echo -e "${line1}\n${line2}"
+}
+
+show_popup() {
+    local text="$1"
+    local left=$(calculate_position)
+    
+    # Запускаем dmenu
+    echo "$text" | dmenu \
+        -l "$HEIGHT" \
+        -W "$WIDTH" \
+        -X "$left" \
+        -Y -25 \
+        -nb "$BG" \
+        -nf "$FG" \
+        -sb "$SB" \
+        -sf "$SF" \
+        -i 2>/dev/null &
+    
+    local pid=$!
+    
+    # Убиваем через TIMEOUT секунд
+    (sleep "$TIMEOUT" && kill "$pid" 2>/dev/null) &
+}
+
+# Обертка - убиваем старый попап перед новым
+quick_popup() {
+    pkill -f "dmenu -l $HEIGHT -W $WIDTH" 2>/dev/null
+    show_popup "$1"
+}
+
+# ============================================
+# KBD
+# ============================================
+kbd_control() {
+    local action="$1"
+    local kbd_path="/sys/class/leds/smc::kbd_backlight/brightness"
+    
+    if [ ! -f "$kbd_path" ]; then
+        [ -f "/sys/class/leds/asus::kbd_backlight/brightness" ] && kbd_path="/sys/class/leds/asus::kbd_backlight/brightness"
+        [ -f "/sys/class/leds/apple::kbd_backlight/brightness" ] && kbd_path="/sys/class/leds/apple::kbd_backlight/brightness"
+    fi
+    
+    if [ ! -f "$kbd_path" ]; then
+        quick_popup "KBD\nERROR"
+        return
+    fi
+    
+    local current=$(cat "$kbd_path")
+    local new=$current
+    
+    case "$action" in
+        +) new=$((current + 25)); [ "$new" -gt 255 ] && new=255 ;;
+        -) new=$((current - 25)); [ "$new" -lt 0 ] && new=0 ;;
+    esac
+    
+    echo "$new" | sudo tee "$kbd_path" > /dev/null
+    local percent=$((new * 100 / 255))
+    
+    quick_popup "$(render_status "kbd" "$percent" "normal")"
+}
+
+# ============================================
+# SCREEN
+# ============================================
+screen_control() {
+    local action="$1"
+    
+    case "$action" in
+        +) brightnessctl set +5% ;;
+        -) brightnessctl set 5%- ;;
+    esac
+    
+    local current=$(brightnessctl get)
+    local max=$(brightnessctl max)
+    local percent=$((current * 100 / max))
+    
+    quick_popup "$(render_status "screen" "$percent" "normal")"
+}
+
+# ============================================
+# VOLUME
+# ============================================
+volume_control() {
+    local action="$1"
+    
+    case "$action" in
+        +) pactl set-sink-volume @DEFAULT_SINK@ +5% ;;
+        -) pactl set-sink-volume @DEFAULT_SINK@ -5% ;;
+        mute) pactl set-sink-mute @DEFAULT_SINK@ toggle ;;
+    esac
+    
+    local volume=$(pactl get-sink-volume @DEFAULT_SINK@ | grep -Po '\d+(?=%)' | head -1)
+    local is_muted=$(pactl get-sink-mute @DEFAULT_SINK@ | grep -Po '(?<=Mute: )(yes|no)')
+    
+    if [ "$is_muted" = "yes" ]; then
+        quick_popup "$(render_status "volume" "0" "muted")"
+    else
+        quick_popup "$(render_status "volume" "$volume" "normal")"
+    fi
+}
+
+# ============================================
+# MAIN
+# ============================================
+case "$1" in
+    kbd)     kbd_control "$2" ;;
+    screen)  screen_control "$2" ;;
+    volume)  volume_control "$2" ;;
+    *)       quick_popup "ERROR\n{$1}" ;;
+esac
