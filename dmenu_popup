@@ -5,7 +5,7 @@
 # Usage: popup <device> <action>
 # ============================================
 
-# Цвета - ВСЕ БЕЛЫЕ (и обычный, и выделенный)
+# Цвета - ВСЕ БЕЛЫЕ
 BG="#051b35"      # фон
 FG="#ffffff"      # обычный текст - БЕЛЫЙ
 SB="#051b35"      # фон выделенного - такой же как фон
@@ -58,7 +58,6 @@ show_popup() {
     local text="$1"
     local left=$(calculate_position)
     
-    # Запускаем dmenu
     echo "$text" | dmenu \
         -l "$HEIGHT" \
         -W "$WIDTH" \
@@ -71,12 +70,9 @@ show_popup() {
         -i 2>/dev/null &
     
     local pid=$!
-    
-    # Убиваем через TIMEOUT секунд
     (sleep "$TIMEOUT" && kill "$pid" 2>/dev/null) &
 }
 
-# Обертка - убиваем старый попап перед новым
 quick_popup() {
     pkill -f "dmenu -l $HEIGHT -W $WIDTH" 2>/dev/null
     show_popup "$1"
@@ -138,9 +134,15 @@ volume_control() {
     local action="$1"
     
     case "$action" in
-        +) pactl set-sink-volume @DEFAULT_SINK@ +5% ;;
-        -) pactl set-sink-volume @DEFAULT_SINK@ -5% ;;
-        mute) pactl set-sink-mute @DEFAULT_SINK@ toggle ;;
+        +)
+            pactl set-sink-volume @DEFAULT_SINK@ +5%
+            ;;
+        -)
+            pactl set-sink-volume @DEFAULT_SINK@ -5%
+            ;;
+        mute)
+            pactl set-sink-mute @DEFAULT_SINK@ toggle
+            ;;
     esac
     
     local volume=$(pactl get-sink-volume @DEFAULT_SINK@ | grep -Po '\d+(?=%)' | head -1)
