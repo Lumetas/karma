@@ -3,10 +3,10 @@
 
 include config.mk
 
-SRC = drw.c dmenu.c stest.c util.c
+SRC = drw.c dmenu.c dmenu_app_list.c stest.c util.c
 OBJ = $(SRC:.c=.o)
 
-all: options dmenu stest
+all: options dmenu dmenu_app_list stest
 
 options:
 	@echo dmenu build options:
@@ -27,6 +27,9 @@ dmenu: dmenu.o drw.o util.o
 
 stest: stest.o
 	$(CC) -o $@ stest.o $(LDFLAGS)
+
+dmenu_app_list: dmenu_app_list.o util.o
+	$(CC) -o $@ dmenu_app_list.o util.o $(LDFLAGS)
 
 clean:
 	rm -f dmenu stest $(OBJ) dmenu-$(VERSION).tar.gz
@@ -62,6 +65,7 @@ uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/dmenu\
 		$(DESTDIR)$(PREFIX)/bin/dmenu_path\
 		$(DESTDIR)$(PREFIX)/bin/dmenu_run\
+		$(DESTDIR)$(PREFIX)/bin/dmenu_app_list\
 		$(DESTDIR)$(PREFIX)/bin/stest\
 		$(DESTDIR)$(MANPREFIX)/man1/dmenu.1\
 		$(DESTDIR)$(MANPREFIX)/man1/stest.1
